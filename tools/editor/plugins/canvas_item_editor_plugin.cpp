@@ -32,13 +32,20 @@
 #include "os/keyboard.h"
 #include "scene/main/viewport.h"
 #include "scene/main/canvas_layer.h"
-#include "scene/2d/node_2d.h"
+#include "scene/2d/sprite.h"
+#include "scene/2d/light_2d.h"
+#include "scene/2d/particles_2d.h"
+#include "scene/2d/polygon_2d.h"
+#include "scene/2d/screen_button.h"
 #include "globals.h"
 #include "os/input.h"
 #include "tools/editor/editor_settings.h"
 #include "scene/gui/grid_container.h"
+#include "scene/gui/patch_9_frame.h"
 #include "tools/editor/animation_editor.h"
 #include "tools/editor/plugins/animation_player_editor_plugin.h"
+#include "tools/editor/script_editor_debugger.h"
+#include "tools/editor/plugins/script_editor_plugin.h"
 #include "scene/resources/packed_scene.h"
 
 
@@ -290,6 +297,7 @@ Dictionary CanvasItemEditor::get_state() const {
 	state["snap_rotation"]=snap_rotation;
 	state["snap_relative"]=snap_relative;
 	state["snap_pixel"]=snap_pixel;
+	state["skeleton_show_bones"]=skeleton_show_bones;
 	return state;
 }
 void CanvasItemEditor::set_state(const Dictionary& p_state){
@@ -350,6 +358,12 @@ void CanvasItemEditor::set_state(const Dictionary& p_state){
 		snap_pixel=state["snap_pixel"];
 		int idx = edit_menu->get_popup()->get_item_index(SNAP_USE_PIXEL);
 		edit_menu->get_popup()->set_item_checked(idx,snap_pixel);
+	}
+
+	if (state.has("skeleton_show_bones")) {
+		skeleton_show_bones=state["skeleton_show_bones"];
+		int idx = skeleton_menu->get_item_index(SKELETON_SHOW_BONES);
+		skeleton_menu->set_item_checked(idx,skeleton_show_bones);
 	}
 }
 
@@ -515,16 +529,23 @@ void CanvasItemEditor::_find_canvas_items_at_rect(const Rect2& p_rect,Node* p_no
 	CanvasItem *c=p_node->cast_to<CanvasItem>();
 
 
-	for (int i=p_node->get_child_count()-1;i>=0;i--) {
+	bool inherited=p_node!=get_tree()->get_edited_scene_root() && p_node->get_filename()!="";
+	bool editable=false;
+	if (inherited){
+		editable=EditorNode::get_singleton()->get_edited_scene()->is_editable_instance(p_node);
+	}
+	bool lock_children=p_node->has_meta("_edit_group_") && p_node->get_meta("_edit_group_");
+	if (!lock_children && (!inherited || editable)) {
+		for (int i=p_node->get_child_count()-1;i>=0;i--) {
 
-		if (c && !c->is_set_as_toplevel())
-			_find_canvas_items_at_rect(p_rect,p_node->get_child(i),p_parent_xform * c->get_transform(),p_canvas_xform,r_items);
-		else {
-			CanvasLayer *cl = p_node->cast_to<CanvasLayer>();
-			_find_canvas_items_at_rect(p_rect,p_node->get_child(i),transform,cl?cl->get_transform():p_canvas_xform,r_items);
+			if (c && !c->is_set_as_toplevel())
+				_find_canvas_items_at_rect(p_rect,p_node->get_child(i),p_parent_xform * c->get_transform(),p_canvas_xform,r_items);
+			else {
+				CanvasLayer *cl = p_node->cast_to<CanvasLayer>();
+				_find_canvas_items_at_rect(p_rect,p_node->get_child(i),transform,cl?cl->get_transform():p_canvas_xform,r_items);
+			}
 		}
 	}
-
 
 	if (c && c->is_visible() && !c->has_meta("_edit_lock_") && !c->cast_to<CanvasLayer>()) {
 
@@ -648,7 +669,7 @@ void CanvasItemEditor::_key_move(const Vector2& p_dir, bool p_snap, KeyMoveMODE 
 	if (editor_selection->get_selected_node_list().empty())
 		return;
 
-	undo_redo->create_action(TTR("Move Action"),true);
+	undo_redo->create_action(TTR("Move Action"),UndoRedo::MERGE_ENDS);
 
 	List<Node*> &selection = editor_selection->get_selected_node_list();
 
@@ -1051,7 +1072,7 @@ void CanvasItemEditor::_viewport_input_event(const InputEvent& p_event) {
 		EditorPluginList *over_plugin_list = en->get_editor_plugins_over();
 
 		if (!over_plugin_list->empty()) {
-			bool discard = over_plugin_list->forward_input_event(p_event);
+			bool discard = over_plugin_list->forward_input_event(transform,p_event);
 			if (discard) {
 				accept_event();
 				return;
@@ -2083,76 +2104,90 @@ void CanvasItemEditor::_viewport_draw() {
 
 	}
 
-	int bone_width = EditorSettings::get_singleton()->get("2d_editor/bone_width");
-	Color bone_color1 = EditorSettings::get_singleton()->get("2d_editor/bone_color1");
-	Color bone_color2 = EditorSettings::get_singleton()->get("2d_editor/bone_color2");
-	Color bone_ik_color = EditorSettings::get_singleton()->get("2d_editor/bone_ik_color");
-	Color bone_selected_color = EditorSettings::get_singleton()->get("2d_editor/bone_selected_color");
+	{
 
-	for(Map<ObjectID,BoneList>::Element*E=bone_list.front();E;E=E->next()) {
+	       EditorNode *en = editor;
+	       EditorPluginList *over_plugin_list = en->get_editor_plugins_over();
 
-		E->get().from=Vector2();
-		E->get().to=Vector2();
+	       if (!over_plugin_list->empty()) {
 
-		Object *obj = ObjectDB::get_instance(E->get().bone);
-		if (!obj)
-			continue;
+		       over_plugin_list->forward_draw_over_canvas(transform,viewport);
 
-		Node2D* n2d = obj->cast_to<Node2D>();
-		if (!n2d)
-			continue;
+	       }
+       }
 
-		if (!n2d->get_parent())
-			continue;
+	if (skeleton_show_bones) {
+		int bone_width = EditorSettings::get_singleton()->get("2d_editor/bone_width");
+		Color bone_color1 = EditorSettings::get_singleton()->get("2d_editor/bone_color1");
+		Color bone_color2 = EditorSettings::get_singleton()->get("2d_editor/bone_color2");
+		Color bone_ik_color = EditorSettings::get_singleton()->get("2d_editor/bone_ik_color");
+		Color bone_selected_color = EditorSettings::get_singleton()->get("2d_editor/bone_selected_color");
 
-		CanvasItem *pi = n2d->get_parent_item();
+		for(Map<ObjectID,BoneList>::Element*E=bone_list.front();E;E=E->next()) {
 
+			E->get().from=Vector2();
+			E->get().to=Vector2();
 
-		Node2D* pn2d=n2d->get_parent()->cast_to<Node2D>();
+			Object *obj = ObjectDB::get_instance(E->get().bone);
+			if (!obj)
+				continue;
 
-		if (!pn2d)
-			continue;
+			Node2D* n2d = obj->cast_to<Node2D>();
+			if (!n2d)
+				continue;
 
-		Vector2 from = transform.xform(pn2d->get_global_pos());
-		Vector2 to = transform.xform(n2d->get_global_pos());
+			if (!n2d->get_parent())
+				continue;
 
-		E->get().from=from;
-		E->get().to=to;
-
-		Vector2 rel = to-from;
-		Vector2 relt = rel.tangent().normalized()*bone_width;
+			CanvasItem *pi = n2d->get_parent_item();
 
 
+			Node2D* pn2d=n2d->get_parent()->cast_to<Node2D>();
 
-		Vector<Vector2> bone_shape;
-		bone_shape.push_back(from);
-		bone_shape.push_back(from+rel*0.2+relt);
-		bone_shape.push_back(to);
-		bone_shape.push_back(from+rel*0.2-relt);
-		Vector<Color> colors;
-		if (pi->has_meta("_edit_ik_")) {
+			if (!pn2d)
+				continue;
 
-			colors.push_back(bone_ik_color);
-			colors.push_back(bone_ik_color);
-			colors.push_back(bone_ik_color);
-			colors.push_back(bone_ik_color);
-		} else {
-			colors.push_back(bone_color1);
-			colors.push_back(bone_color2);
-			colors.push_back(bone_color1);
-			colors.push_back(bone_color2);
-		}
+			Vector2 from = transform.xform(pn2d->get_global_pos());
+			Vector2 to = transform.xform(n2d->get_global_pos());
+
+			E->get().from=from;
+			E->get().to=to;
+
+			Vector2 rel = to-from;
+			Vector2 relt = rel.tangent().normalized()*bone_width;
 
 
-		VisualServer::get_singleton()->canvas_item_add_primitive(ci,bone_shape,colors,Vector<Vector2>(),RID());
 
-		if (editor_selection->is_selected(pi)) {
-			for(int i=0;i<bone_shape.size();i++) {
+			Vector<Vector2> bone_shape;
+			bone_shape.push_back(from);
+			bone_shape.push_back(from+rel*0.2+relt);
+			bone_shape.push_back(to);
+			bone_shape.push_back(from+rel*0.2-relt);
+			Vector<Color> colors;
+			if (pi->has_meta("_edit_ik_")) {
 
-				VisualServer::get_singleton()->canvas_item_add_line(ci,bone_shape[i],bone_shape[(i+1)%bone_shape.size()],bone_selected_color,2);
+				colors.push_back(bone_ik_color);
+				colors.push_back(bone_ik_color);
+				colors.push_back(bone_ik_color);
+				colors.push_back(bone_ik_color);
+			} else {
+				colors.push_back(bone_color1);
+				colors.push_back(bone_color2);
+				colors.push_back(bone_color1);
+				colors.push_back(bone_color2);
 			}
-		}
 
+
+			VisualServer::get_singleton()->canvas_item_add_primitive(ci,bone_shape,colors,Vector<Vector2>(),RID());
+
+			if (editor_selection->is_selected(pi)) {
+				for(int i=0;i<bone_shape.size();i++) {
+
+					VisualServer::get_singleton()->canvas_item_add_line(ci,bone_shape[i],bone_shape[(i+1)%bone_shape.size()],bone_selected_color,2);
+				}
+			}
+
+		}
 	}
 }
 
@@ -2535,6 +2570,12 @@ void CanvasItemEditor::_popup_callback(int p_op) {
 		case SNAP_CONFIGURE: {
 			((SnapDialog *)snap_dialog)->set_fields(snap_offset, snap_step, snap_rotation_offset, snap_rotation_step);
 			snap_dialog->popup_centered(Size2(220,160));
+		} break;
+		case SKELETON_SHOW_BONES: {
+			skeleton_show_bones = !skeleton_show_bones;
+			int idx = skeleton_menu->get_item_index(SKELETON_SHOW_BONES);
+			skeleton_menu->set_item_checked(idx,skeleton_show_bones);
+			viewport->update();
 		} break;
 		case ZOOM_IN: {
 			if (zoom>MAX_ZOOM)
@@ -2979,57 +3020,7 @@ void CanvasItemEditor::_popup_callback(int p_op) {
 		case VIEW_CENTER_TO_SELECTION:
 		case VIEW_FRAME_TO_SELECTION: {
 
-			Vector2 center(0.f, 0.f);
-			Rect2 rect;
-			int count = 0;
-
-			Map<Node*,Object*> &selection = editor_selection->get_selection();
-			for(Map<Node*,Object*>::Element *E=selection.front();E;E=E->next()) {
-				CanvasItem *canvas_item = E->key()->cast_to<CanvasItem>();
-				if (!canvas_item) continue;
-				if (canvas_item->get_viewport()!=EditorNode::get_singleton()->get_scene_root())
-					continue;
-
-
-				// counting invisible items, for now
-				//if (!canvas_item->is_visible()) continue;
-				++count;
-
-				Rect2 item_rect = canvas_item->get_item_rect();
-
-				Vector2 pos = canvas_item->get_global_transform().get_origin();
-				Vector2 scale = canvas_item->get_global_transform().get_scale();
-				real_t angle = canvas_item->get_global_transform().get_rotation();
-
-				Matrix32 t(angle, Vector2(0.f,0.f));
-				item_rect = t.xform(item_rect);
-				Rect2 canvas_item_rect(pos + scale*item_rect.pos, scale*item_rect.size);
-				if (count == 1) {
-					rect = canvas_item_rect;
-				} else {
-					rect = rect.merge(canvas_item_rect);
-				}
-			};
-			if (count==0) break;
-
-			if (p_op == VIEW_CENTER_TO_SELECTION) {
-
-				center = rect.pos + rect.size/2;
-				Vector2 offset = viewport->get_size()/2 - editor->get_scene_root()->get_global_canvas_transform().xform(center);
-				h_scroll->set_val(h_scroll->get_val() - offset.x/zoom);
-				v_scroll->set_val(v_scroll->get_val() - offset.y/zoom);
-
-			} else { // VIEW_FRAME_TO_SELECTION
-
-				if (rect.size.x > CMP_EPSILON && rect.size.y > CMP_EPSILON) {
-					float scale_x = viewport->get_size().x/rect.size.x;
-					float scale_y = viewport->get_size().y/rect.size.y;
-					zoom = scale_x < scale_y? scale_x:scale_y;
-					zoom *= 0.90;
-					_update_scroll(0);
-					call_deferred("_popup_callback", VIEW_CENTER_TO_SELECTION);
-				}
-			}
+			_focus_selection(p_op);
 
 		} break;
 		case SKELETON_MAKE_BONES: {
@@ -3049,6 +3040,8 @@ void CanvasItemEditor::_popup_callback(int p_op) {
 					continue;
 
 				n2d->set_meta("_edit_bone_",true);
+				if (!skeleton_show_bones)
+					skeleton_menu->activate_item(skeleton_menu->get_item_index(SKELETON_SHOW_BONES));
 
 			}
 			viewport->update();
@@ -3067,6 +3060,8 @@ void CanvasItemEditor::_popup_callback(int p_op) {
 					continue;
 
 				n2d->set_meta("_edit_bone_",Variant());
+				if (!skeleton_show_bones)
+					skeleton_menu->activate_item(skeleton_menu->get_item_index(SKELETON_SHOW_BONES));
 
 			}
 			viewport->update();
@@ -3086,6 +3081,8 @@ void CanvasItemEditor::_popup_callback(int p_op) {
 					continue;
 
 				canvas_item->set_meta("_edit_ik_",true);
+				if (!skeleton_show_bones)
+					skeleton_menu->activate_item(skeleton_menu->get_item_index(SKELETON_SHOW_BONES));
 
 			}
 
@@ -3105,6 +3102,8 @@ void CanvasItemEditor::_popup_callback(int p_op) {
 					continue;
 
 				n2d->set_meta("_edit_ik_",Variant());
+				if (!skeleton_show_bones)
+					skeleton_menu->activate_item(skeleton_menu->get_item_index(SKELETON_SHOW_BONES));
 
 			}
 			viewport->update();
@@ -3141,6 +3140,62 @@ template< class P, class C > void CanvasItemEditor::space_selected_items() {
 	}
 }
 #endif
+
+
+void CanvasItemEditor::_focus_selection(int p_op) {
+	Vector2 center(0.f, 0.f);
+	Rect2 rect;
+	int count = 0;
+
+	Map<Node*,Object*> &selection = editor_selection->get_selection();
+	for(Map<Node*,Object*>::Element *E=selection.front();E;E=E->next()) {
+		CanvasItem *canvas_item = E->key()->cast_to<CanvasItem>();
+		if (!canvas_item) continue;
+		if (canvas_item->get_viewport()!=EditorNode::get_singleton()->get_scene_root())
+			continue;
+
+
+		// counting invisible items, for now
+		//if (!canvas_item->is_visible()) continue;
+		++count;
+
+		Rect2 item_rect = canvas_item->get_item_rect();
+
+		Vector2 pos = canvas_item->get_global_transform().get_origin();
+		Vector2 scale = canvas_item->get_global_transform().get_scale();
+		real_t angle = canvas_item->get_global_transform().get_rotation();
+
+		Matrix32 t(angle, Vector2(0.f,0.f));
+		item_rect = t.xform(item_rect);
+		Rect2 canvas_item_rect(pos + scale*item_rect.pos, scale*item_rect.size);
+		if (count == 1) {
+			rect = canvas_item_rect;
+		} else {
+			rect = rect.merge(canvas_item_rect);
+		}
+	};
+	if (count==0) return;
+
+	if (p_op == VIEW_CENTER_TO_SELECTION) {
+
+		center = rect.pos + rect.size/2;
+		Vector2 offset = viewport->get_size()/2 - editor->get_scene_root()->get_global_canvas_transform().xform(center);
+		h_scroll->set_val(h_scroll->get_val() - offset.x/zoom);
+		v_scroll->set_val(v_scroll->get_val() - offset.y/zoom);
+
+	} else { // VIEW_FRAME_TO_SELECTION
+
+		if (rect.size.x > CMP_EPSILON && rect.size.y > CMP_EPSILON) {
+			float scale_x = viewport->get_size().x/rect.size.x;
+			float scale_y = viewport->get_size().y/rect.size.y;
+			zoom = scale_x < scale_y? scale_x:scale_y;
+			zoom *= 0.90;
+			_update_scroll(0);
+			call_deferred("_popup_callback", VIEW_CENTER_TO_SELECTION);
+		}
+	}
+}
+
 
 void CanvasItemEditor::_bind_methods() {
 
@@ -3247,6 +3302,12 @@ VSplitContainer *CanvasItemEditor::get_bottom_split() {
 	return bottom_split;
 }
 
+
+void CanvasItemEditor::focus_selection() {
+	_focus_selection(VIEW_CENTER_TO_SELECTION);
+}
+
+
 CanvasItemEditor::CanvasItemEditor(EditorNode *p_editor) {
 
 	tool = TOOL_SELECT;
@@ -3279,7 +3340,7 @@ CanvasItemEditor::CanvasItemEditor(EditorNode *p_editor) {
 	vp->add_child(p_editor->get_scene_root());
 
 
-	viewport = memnew( Control );
+	viewport = memnew( CanvasItemEditorViewport(p_editor, this) );
 	vp_base->add_child(viewport);
 	viewport->set_area_as_parent_rect();
 
@@ -3389,15 +3450,17 @@ CanvasItemEditor::CanvasItemEditor(EditorNode *p_editor) {
 	p->add_shortcut(ED_SHORTCUT("canvas_item_editor/expand_to_parent", TTR("Expand to Parent"), KEY_MASK_CMD | KEY_P), EXPAND_TO_PARENT);
 	p->add_separator();
 	p->add_submenu_item(TTR("Skeleton.."),"skeleton");
-	PopupMenu *p2 = memnew(PopupMenu);
-	p->add_child(p2);
-	p2->set_name("skeleton");
-	p2->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_make_bones", TTR("Make Bones"), KEY_MASK_CMD | KEY_MASK_SHIFT | KEY_B ),SKELETON_MAKE_BONES);
-	p2->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_clear_bones", TTR("Clear Bones")), SKELETON_CLEAR_BONES);
-	p2->add_separator();
-	p2->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_set_ik_chain", TTR("Make IK Chain")), SKELETON_SET_IK_CHAIN);
-	p2->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_clear_ik_chain", TTR("Clear IK Chain")), SKELETON_CLEAR_IK_CHAIN);
-	p2->connect("item_pressed", this,"_popup_callback");
+	skeleton_menu = memnew(PopupMenu);
+	p->add_child(skeleton_menu);
+	skeleton_menu->set_name("skeleton");
+	skeleton_menu->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_make_bones", TTR("Make Bones"), KEY_MASK_CMD | KEY_MASK_SHIFT | KEY_B ),SKELETON_MAKE_BONES);
+	skeleton_menu->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_clear_bones", TTR("Clear Bones")), SKELETON_CLEAR_BONES);
+	skeleton_menu->add_separator();
+	skeleton_menu->add_check_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_show_bones", TTR("Show Bones")), SKELETON_SHOW_BONES);
+	skeleton_menu->add_separator();
+	skeleton_menu->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_set_ik_chain", TTR("Make IK Chain")), SKELETON_SET_IK_CHAIN);
+	skeleton_menu->add_shortcut(ED_SHORTCUT("canvas_item_editor/skeleton_clear_ik_chain", TTR("Clear IK Chain")), SKELETON_CLEAR_IK_CHAIN);
+	skeleton_menu->connect("item_pressed", this,"_popup_callback");
 
 
 	/*
@@ -3523,6 +3586,8 @@ CanvasItemEditor::CanvasItemEditor(EditorNode *p_editor) {
 	snap_show_grid=false;
 	snap_rotation=false;
 	snap_pixel=false;
+	skeleton_show_bones=true;
+	skeleton_menu->set_item_checked(skeleton_menu->get_item_index(SKELETON_SHOW_BONES),true);
 	updating_value_dialog=false;
 	box_selecting=false;
 	//zoom=0.5;
@@ -3591,3 +3656,398 @@ CanvasItemEditorPlugin::~CanvasItemEditorPlugin()
 }
 
 
+void CanvasItemEditorViewport::_on_mouse_exit() {
+	if (selector->is_hidden()){
+		_remove_preview();
+	}
+}
+
+void CanvasItemEditorViewport::_on_select_type(Object* selected) {
+	CheckBox* check = selected->cast_to<CheckBox>();
+	String type = check->get_text();
+	selector_label->set_text(vformat(TTR("Add %s"),type));
+	label->set_text(vformat(TTR("Adding %s..."),type));
+}
+
+void CanvasItemEditorViewport::_on_change_type() {
+	CheckBox* check=btn_group->get_pressed_button()->cast_to<CheckBox>();
+	default_type=check->get_text();
+	_perform_drop_data();
+	selector->hide();
+}
+
+void CanvasItemEditorViewport::_create_preview(const Vector<String>& files) const {
+	label->set_pos(get_global_pos()+Point2(14,14));
+	label_desc->set_pos(label->get_pos()+Point2(0,label->get_size().height));
+	for (int i=0;i<files.size();i++) {
+		String path=files[i];
+		RES res=ResourceLoader::load(path);
+		String type=res->get_type();
+		if (type=="ImageTexture" || type=="PackedScene") {
+			if (type=="ImageTexture") {
+				Ref<ImageTexture> texture=Ref<ImageTexture> ( ResourceCache::get(path)->cast_to<ImageTexture>() );
+				Sprite* sprite=memnew(Sprite);
+				sprite->set_texture(texture);
+				sprite->set_opacity(0.7f);
+				preview->add_child(sprite);
+				label->show();
+				label_desc->show();
+			} else if (type=="PackedScene") {
+				Ref<PackedScene> scn=ResourceLoader::load(path);
+				if (scn.is_valid()){
+					Node* instance=scn->instance();
+					if (instance){
+						preview->add_child(instance);
+					}
+				}
+			}
+			editor->get_scene_root()->add_child(preview);
+		}
+	}
+}
+
+void CanvasItemEditorViewport::_remove_preview() {
+	if (preview->get_parent()){
+		editor->get_scene_root()->remove_child(preview);
+		for (int i=preview->get_child_count()-1;i>=0;i--){
+			Node* node=preview->get_child(i);
+			memdelete(node);
+		}
+		label->hide();
+		label_desc->hide();
+	}
+}
+
+bool CanvasItemEditorViewport::_cyclical_dependency_exists(const String& p_target_scene_path, Node* p_desired_node) {
+	if (p_desired_node->get_filename()==p_target_scene_path) {
+		return true;
+	}
+
+	int childCount=p_desired_node->get_child_count();
+	for (int i=0;i<childCount;i++) {
+		Node* child=p_desired_node->get_child(i);
+		if(_cyclical_dependency_exists(p_target_scene_path,child)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void CanvasItemEditorViewport::_create_nodes(Node* parent, Node* child, String& path, const Point2& p_point) {
+	child->set_name(path.get_file().basename());
+	Ref<ImageTexture> texture=Ref<ImageTexture> ( ResourceCache::get(path)->cast_to<ImageTexture>() );
+	Size2 texture_size = texture->get_size();
+
+	editor_data->get_undo_redo().add_do_method(parent,"add_child",child);
+	editor_data->get_undo_redo().add_do_method(child,"set_owner",editor->get_edited_scene());
+	editor_data->get_undo_redo().add_do_reference(child);
+	editor_data->get_undo_redo().add_undo_method(parent,"remove_child",child);
+
+	String new_name=parent->validate_child_name(child);
+	ScriptEditorDebugger *sed=ScriptEditor::get_singleton()->get_debugger();
+	editor_data->get_undo_redo().add_do_method(sed,"live_debug_create_node",editor->get_edited_scene()->get_path_to(parent),child->get_type(),new_name);
+	editor_data->get_undo_redo().add_undo_method(sed,"live_debug_remove_node",NodePath(String(editor->get_edited_scene()->get_path_to(parent))+"/"+new_name));
+
+	// handle with different property for texture
+	String property = "texture";
+	List<PropertyInfo> props;
+	child->get_property_list(&props);
+	for(const List<PropertyInfo>::Element *E=props.front();E;E=E->next() ) {
+		if (E->get().name=="config/texture") { // Particles2D
+			property="config/texture";
+			break;
+		} else if (E->get().name=="texture/texture") { // Polygon2D
+			property="texture/texture";
+			break;
+		} else if (E->get().name=="normal") { // TouchScreenButton
+			property="normal";
+			break;
+		}
+	}
+	editor_data->get_undo_redo().add_do_property(child,property,texture);
+
+	// make visible for certain node type
+	if (default_type=="Patch9Frame") {
+		editor_data->get_undo_redo().add_do_property(child,"rect/size",texture_size);
+	} else if (default_type=="Polygon2D") {
+		DVector<Vector2> list;
+		list.push_back(Vector2(0,0));
+		list.push_back(Vector2(texture_size.width,0));
+		list.push_back(Vector2(texture_size.width,texture_size.height));
+		list.push_back(Vector2(0,texture_size.height));
+		editor_data->get_undo_redo().add_do_property(child,"polygon",list);
+	}
+
+	// locate at preview position
+	Point2 pos;
+	if (parent->has_method("get_global_pos")) {
+		pos=parent->call("get_global_pos");
+	}
+	Matrix32 trans=canvas->get_canvas_transform();
+	Point2 target_pos = (p_point-trans.get_origin())/trans.get_scale().x-pos;
+	if (default_type=="Polygon2D" || default_type=="TouchScreenButton" || default_type=="TextureFrame" || default_type=="Patch9Frame") {
+		target_pos -= texture_size/2;
+	}
+	editor_data->get_undo_redo().add_do_method(child,"set_pos",target_pos);
+}
+
+bool CanvasItemEditorViewport::_create_instance(Node* parent, String& path, const Point2& p_point) {
+	Ref<PackedScene> sdata=ResourceLoader::load(path);
+	if (!sdata.is_valid()) { // invalid scene
+		return false;
+	}
+
+	Node* instanced_scene=sdata->instance(true);
+	if (!instanced_scene) { // error on instancing
+		return false;
+	}
+
+	if (editor->get_edited_scene()->get_filename()!="") { // cyclical instancing
+		if (_cyclical_dependency_exists(editor->get_edited_scene()->get_filename(), instanced_scene)) {
+			memdelete(instanced_scene);
+			return false;
+		}
+	}
+
+	instanced_scene->set_filename( Globals::get_singleton()->localize_path(path) );
+
+	editor_data->get_undo_redo().add_do_method(parent,"add_child",instanced_scene);
+	editor_data->get_undo_redo().add_do_method(instanced_scene,"set_owner",editor->get_edited_scene());
+	editor_data->get_undo_redo().add_do_reference(instanced_scene);
+	editor_data->get_undo_redo().add_undo_method(parent,"remove_child",instanced_scene);
+
+	String new_name=parent->validate_child_name(instanced_scene);
+	ScriptEditorDebugger *sed=ScriptEditor::get_singleton()->get_debugger();
+	editor_data->get_undo_redo().add_do_method(sed,"live_debug_instance_node",editor->get_edited_scene()->get_path_to(parent),path,new_name);
+	editor_data->get_undo_redo().add_undo_method(sed,"live_debug_remove_node",NodePath(String(editor->get_edited_scene()->get_path_to(parent))+"/"+new_name));
+
+	Point2 pos;
+	Node2D* parent_node2d=parent->cast_to<Node2D>();
+	if (parent_node2d) {
+		pos=parent_node2d->get_global_pos();
+	} else {
+		Control* parent_control=parent->cast_to<Control>();
+		if (parent_control) {
+			pos=parent_control->get_global_pos();
+		}
+	}
+	Matrix32 trans=canvas->get_canvas_transform();
+	editor_data->get_undo_redo().add_do_method(instanced_scene,"set_pos",(p_point-trans.get_origin())/trans.get_scale().x-pos);
+
+	return true;
+}
+
+void CanvasItemEditorViewport::_perform_drop_data(){
+	_remove_preview();
+
+	Vector<String> error_files;
+
+	editor_data->get_undo_redo().create_action(TTR("Create Node"));
+
+	for (int i=0;i<selected_files.size();i++) {
+		String path=selected_files[i];
+		RES res=ResourceLoader::load(path);
+		if (res.is_null()) {
+			continue;
+		}
+		String type=res->get_type();
+		if (type=="ImageTexture") {
+			Node* child;
+			if      (default_type=="Light2D")           child=memnew(Light2D);
+			else if (default_type=="Particles2D")       child=memnew(Particles2D);
+			else if (default_type=="Polygon2D")         child=memnew(Polygon2D);
+			else if (default_type=="TouchScreenButton") child=memnew(TouchScreenButton);
+			else if (default_type=="TextureFrame")      child=memnew(TextureFrame);
+			else if (default_type=="Patch9Frame")       child=memnew(Patch9Frame);
+			else child=memnew(Sprite); // default
+
+			_create_nodes(target_node, child, path, drop_pos);
+		} else if (type=="PackedScene") {
+			bool success=_create_instance(target_node, path, drop_pos);
+			if (!success) {
+				error_files.push_back(path);
+			}
+		}
+	}
+
+	editor_data->get_undo_redo().commit_action();
+
+	if (error_files.size()>0) {
+		String files_str;
+		for (int i=0;i<error_files.size();i++) {
+			files_str += error_files[i].get_file().basename() + ",";
+		}
+		files_str=files_str.substr(0,files_str.length()-1);
+		accept->get_ok()->set_text(TTR("Ugh"));
+		accept->set_text(vformat(TTR("Error instancing scene from %s"),files_str.c_str()));
+		accept->popup_centered_minsize();
+	}
+}
+
+bool CanvasItemEditorViewport::can_drop_data(const Point2& p_point,const Variant& p_data) const {
+	Dictionary d=p_data;
+	if (d.has("type")) {
+		if (String(d["type"])=="files") {
+			Vector<String> files=d["files"];
+			bool can_instance=false;
+			for (int i=0;i<files.size();i++) { // check if dragged files contain resource or scene can be created at least one
+				RES res=ResourceLoader::load(files[i]);
+				if (res.is_null()) {
+					continue;
+				}
+				String type=res->get_type();
+				if (type=="PackedScene") {
+					Ref<PackedScene> sdata=ResourceLoader::load(files[i]);
+					Node* instanced_scene=sdata->instance(true);
+					if (!instanced_scene) {
+						continue;
+					}
+					memdelete(instanced_scene);
+				}
+				can_instance=true;
+				break;
+			}
+			if (can_instance) {
+				if (!preview->get_parent()){ // create preview only once
+					_create_preview(files);
+				}
+				Matrix32 trans=canvas->get_canvas_transform();
+				preview->set_pos((p_point-trans.get_origin())/trans.get_scale().x);
+				label->set_text(vformat(TTR("Adding %s..."),default_type));
+			}
+			return can_instance;
+		}
+	}
+	label->hide();
+	return false;
+}
+
+void CanvasItemEditorViewport::drop_data(const Point2& p_point,const Variant& p_data) {
+	bool is_shift=Input::get_singleton()->is_key_pressed(KEY_SHIFT);
+	bool is_alt=Input::get_singleton()->is_key_pressed(KEY_ALT);
+
+	selected_files.clear();
+	Dictionary d=p_data;
+	if (d.has("type") && String(d["type"])=="files"){
+		selected_files=d["files"];
+	}
+
+	List<Node*> list=editor->get_editor_selection()->get_selected_node_list();
+	if (list.size()==0) {
+		accept->get_ok()->set_text(TTR("OK :("));
+		accept->set_text(TTR("No parent to instance a child at."));
+		accept->popup_centered_minsize();
+		_remove_preview();
+		return;
+	}
+	if (list.size()!=1) {
+		accept->get_ok()->set_text(TTR("I see.."));
+		accept->set_text(TTR("This operation requires a single selected node."));
+		accept->popup_centered_minsize();
+		_remove_preview();
+		return;
+	}
+
+	target_node=list[0];
+	if (is_shift && target_node!=editor->get_edited_scene()) {
+		target_node=target_node->get_parent();
+	}
+	drop_pos=p_point;
+
+	if (is_alt) {
+		List<BaseButton*> btn_list;
+		btn_group->get_button_list(&btn_list);
+		for (int i=0;i<btn_list.size();i++) {
+			CheckBox* check=btn_list[i]->cast_to<CheckBox>();
+			check->set_pressed(check->get_text()==default_type);
+		}
+		selector_label->set_text(vformat(TTR("Add %s"),default_type));
+		selector->popup_centered_minsize();
+	} else {
+		_perform_drop_data();
+	}
+}
+
+void CanvasItemEditorViewport::_notification(int p_what) {
+	if (p_what==NOTIFICATION_ENTER_TREE) {
+		connect("mouse_exit",this,"_on_mouse_exit");
+	} else if (p_what==NOTIFICATION_EXIT_TREE) {
+		disconnect("mouse_exit",this,"_on_mouse_exit");
+	}
+}
+
+void CanvasItemEditorViewport::_bind_methods() {
+	ObjectTypeDB::bind_method(_MD("_on_select_type"),&CanvasItemEditorViewport::_on_select_type);
+	ObjectTypeDB::bind_method(_MD("_on_change_type"),&CanvasItemEditorViewport::_on_change_type);
+	ObjectTypeDB::bind_method(_MD("_on_mouse_exit"),&CanvasItemEditorViewport::_on_mouse_exit);
+}
+
+CanvasItemEditorViewport::CanvasItemEditorViewport(EditorNode *p_node, CanvasItemEditor* p_canvas) {
+	default_type="Sprite";
+	// Node2D
+	types.push_back("Sprite");
+	types.push_back("Light2D");
+	types.push_back("Particles2D");
+	types.push_back("Polygon2D");
+	types.push_back("TouchScreenButton");
+	// Control
+	types.push_back("TextureFrame");
+	types.push_back("Patch9Frame");
+
+	target_node=NULL;
+	editor=p_node;
+	editor_data=editor->get_scene_tree_dock()->get_editor_data();
+	canvas=p_canvas;
+	preview=memnew( Node2D );
+	accept=memnew( AcceptDialog );
+	editor->get_gui_base()->add_child(accept);
+
+	selector=memnew( WindowDialog );
+	selector->set_title(TTR("Change default type"));
+
+	VBoxContainer* vbc=memnew(VBoxContainer);
+	vbc->add_constant_override("separation",10*EDSCALE);
+	vbc->set_custom_minimum_size(Size2(200,260)*EDSCALE);
+
+	selector_label=memnew(Label);
+	selector_label->set_align(Label::ALIGN_CENTER);
+	selector_label->set_valign(Label::VALIGN_BOTTOM);
+	selector_label->set_custom_minimum_size(Size2(0,30)*EDSCALE);
+	vbc->add_child(selector_label);
+
+	btn_group=memnew( ButtonGroup );
+	btn_group->set_h_size_flags(0);
+	btn_group->connect("button_selected", this, "_on_select_type");
+
+	for (int i=0;i<types.size();i++) {
+		CheckBox* check=memnew(CheckBox);
+		check->set_text(types[i]);
+		btn_group->add_child(check);
+	}
+	vbc->add_child(btn_group);
+
+	Button* ok=memnew(Button);
+	ok->set_text(TTR("OK"));
+	ok->set_h_size_flags(0);
+	vbc->add_child(ok);
+	ok->connect("pressed", this, "_on_change_type");
+
+	selector->add_child(vbc);
+	editor->get_gui_base()->add_child(selector);
+
+	label=memnew(Label);
+	label->add_color_override("font_color", Color(1,1,0,1));
+	label->add_color_override("font_color_shadow", Color(0,0,0,1));
+	label->add_constant_override("shadow_as_outline", 1*EDSCALE);
+	label->hide();
+	editor->get_gui_base()->add_child(label);
+
+	label_desc=memnew(Label);
+	label_desc->set_text(TTR("Drag & drop + Shift : Add node as sibling\nDrag & drop + Alt : Change node type"));
+	label_desc->add_color_override("font_color", Color(0.6,0.6,0.6,1));
+	label_desc->add_color_override("font_color_shadow", Color(0.2,0.2,0.2,1));
+	label_desc->add_constant_override("shadow_as_outline", 1*EDSCALE);
+	label_desc->add_constant_override("line_spacing", 0);
+	label_desc->hide();
+	editor->get_gui_base()->add_child(label_desc);
+}

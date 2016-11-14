@@ -69,6 +69,7 @@ friend class Tree;
 		Ref<Texture> icon;
 		Rect2i icon_region;
 		String text;
+		String suffix;
 		double min,max,step,val;
 		int icon_max_w;
 		bool expr;
@@ -167,6 +168,9 @@ public:
 
 	void set_text(int p_column,String p_text);
 	String get_text(int p_column) const;
+
+	void set_suffix(int p_column,String p_suffix);
+	String get_suffix(int p_column) const;
 
 	void set_icon(int p_column,const Ref<Texture>& p_icon);
 	Ref<Texture> get_icon(int p_column) const;
@@ -386,6 +390,8 @@ friend class TreeItem;
 		int button_margin;
 		Point2 offset;
 		int draw_relationship_lines;
+		int scroll_border;
+		int scroll_speed;
 
 		enum ClickType {
 			CLICK_NONE,
@@ -441,6 +447,7 @@ friend class TreeItem;
 	bool drag_touching_deaccel;
 	bool click_handled;
 	bool allow_rmb_select;
+	bool scrolling;
 
 	bool force_select_on_already_selected;
 

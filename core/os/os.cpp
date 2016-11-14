@@ -542,7 +542,7 @@ void OS::set_use_vsync(bool p_enable) {
 
 }
 
-bool OS::is_vsnc_enabled() const{
+bool OS::is_vsync_enabled() const{
 
 	return true;
 }
@@ -587,6 +587,9 @@ OS::OS() {
 	_time_scale=1.0;
 	_pixel_snap=false;
 	_allow_hidpi=true;
+	_fixed_frames=0;
+	_idle_frames=0;
+	_in_fixed=false;
 	Math::seed(1234567);
 }
 

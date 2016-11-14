@@ -179,6 +179,15 @@ bool GDScript::can_instance() const {
 
 }
 
+Ref<Script> GDScript::get_base_script() const {
+
+	if (_base) {
+		return Ref<GDScript>( _base );
+	} else {
+		return Ref<Script>();
+	}
+}
+
 StringName GDScript::get_instance_base_type() const {
 
 	if (native.is_valid())
@@ -742,7 +751,7 @@ void GDScript::_get_property_list(List<PropertyInfo> *p_properties) const {
 
 void GDScript::_bind_methods() {
 
-	ObjectTypeDB::bind_native_method(METHOD_FLAGS_DEFAULT,"new",&GDScript::_new,MethodInfo(Variant::OBJECT,"new"));
+	ObjectTypeDB::bind_vararg_method(METHOD_FLAGS_DEFAULT,"new",&GDScript::_new,MethodInfo(Variant::OBJECT,"new"));
 
 	ObjectTypeDB::bind_method(_MD("get_as_byte_code"),&GDScript::get_as_byte_code);
 
