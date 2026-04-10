@@ -1,198 +1,162 @@
-/*************************************************************************/
-/*  scene_string_names.h                                                 */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
-/*************************************************************************/
-/* Copyright (c) 2007-2016 Juan Linietsky, Ariel Manzur.                 */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
-#ifndef SCENE_STRING_NAMES_H
-#define SCENE_STRING_NAMES_H
+/**************************************************************************/
+/*  scene_string_names.h                                                  */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#include "string_db.h"
-#include "path_db.h"
+#pragma once
+
+#include "core/string/string_name.h"
+
 class SceneStringNames {
+	inline static SceneStringNames *singleton = nullptr;
 
-friend void register_scene_types();
-friend void unregister_scene_types();
-
-	static SceneStringNames* singleton;
-
-	static void create() { singleton = memnew(SceneStringNames); }
-	static void free() { memdelete( singleton); singleton=NULL; }
-
-	SceneStringNames();
 public:
-	_FORCE_INLINE_ static SceneStringNames* get_singleton() { return singleton; }
+	static void create() { singleton = memnew(SceneStringNames); }
+	static void free() {
+		memdelete(singleton);
+		singleton = nullptr;
+	}
 
+	_FORCE_INLINE_ static SceneStringNames *get_singleton() { return singleton; }
 
-	StringName resized;
-	StringName dot;
-	StringName doubledot;
-	StringName draw;
-	StringName hide;
-	StringName visibility_changed;
-	StringName input_event;
-	StringName _input_event;
-	StringName item_rect_changed;
-	StringName shader_shader;
-	StringName shader_unshaded;
-	StringName shading_mode;
-	StringName enter_tree;
-	StringName exit_tree;
-	StringName size_flags_changed;
-	StringName minimum_size_changed;
-	StringName sleeping_state_changed;
-	StringName idle;
-	StringName iteration;
-	StringName update;
-	StringName updated;
+	const StringName resized = "resized";
+	const StringName draw = "draw";
+	const StringName hidden = "hidden";
+	const StringName visibility_changed = "visibility_changed";
 
-	StringName line_separation;
+	const StringName input_event = "input_event";
+	const StringName gui_input = "gui_input";
+	const StringName window_input = "window_input";
+	const StringName nonclient_window_input = "nonclient_window_input";
 
-	StringName mouse_enter;
-	StringName mouse_exit;
-	StringName focus_enter;
-	StringName focus_exit;
+	const StringName tree_entered = "tree_entered";
+	const StringName tree_exiting = "tree_exiting";
+	const StringName tree_exited = "tree_exited";
+	const StringName ready = "ready";
+	const StringName _ready = "_ready";
 
-	StringName sort_children;
+	const StringName item_rect_changed = "item_rect_changed";
+	const StringName size_flags_changed = "size_flags_changed";
+	const StringName maximum_size_changed = "maximum_size_changed";
+	const StringName minimum_size_changed = "minimum_size_changed";
+	const StringName sleeping_state_changed = "sleeping_state_changed";
+	const StringName node_configuration_warning_changed = "node_configuration_warning_changed";
+	const StringName update = "update";
+	const StringName updated = "updated";
 
-	StringName finished;
-	StringName animation_changed;
-	StringName animation_started;
+	const StringName line_separation = "line_separation";
+	const StringName paragraph_separation = "paragraph_separation";
+	const StringName font = "font";
+	const StringName font_size = "font_size";
+	const StringName font_color = "font_color";
 
-	StringName body_enter_shape;
-	StringName body_enter;
-	StringName body_exit_shape;
-	StringName body_exit;
+	const StringName mouse_entered = "mouse_entered";
+	const StringName mouse_exited = "mouse_exited";
+	const StringName mouse_shape_entered = "mouse_shape_entered";
+	const StringName mouse_shape_exited = "mouse_shape_exited";
+	const StringName focus_entered = "focus_entered";
+	const StringName focus_exited = "focus_exited";
 
-	StringName area_enter_shape;
-	StringName area_exit_shape;
+	const StringName pre_sort_children = "pre_sort_children";
+	const StringName sort_children = "sort_children";
 
-	StringName _body_inout;
-	StringName _area_inout;
+	const StringName finished = "finished";
+	const StringName animation_finished = "animation_finished";
+	const StringName animation_changed = "animation_changed";
+	const StringName animation_started = "animation_started";
+	const StringName RESET = "RESET";
 
+	const StringName pose_updated = "pose_updated";
+	const StringName skeleton_updated = "skeleton_updated";
+	const StringName bone_enabled_changed = "bone_enabled_changed";
+	const StringName show_rest_only_changed = "show_rest_only_changed";
 
-	StringName _get_gizmo_geometry;
-	StringName _can_gizmo_scale;
+	const StringName body_shape_entered = "body_shape_entered";
+	const StringName body_entered = "body_entered";
+	const StringName body_shape_exited = "body_shape_exited";
+	const StringName body_exited = "body_exited";
 
-	StringName _fixed_process;
-	StringName _process;
-	StringName _enter_world;
-	StringName _exit_world;
-	StringName _enter_tree;
-	StringName _exit_tree;
-	StringName _draw;
-	StringName _input;
-	StringName _ready;
+	const StringName area_shape_entered = "area_shape_entered";
+	const StringName area_shape_exited = "area_shape_exited";
 
-	StringName _pressed;
-	StringName _toggled;
+	const StringName screen_entered = "screen_entered";
+	const StringName screen_exited = "screen_exited";
 
-	StringName _update_scroll;
-	StringName _update_xform;
+	const StringName _spatial_editor_group = "_spatial_editor_group";
+	const StringName _request_gizmo = "_request_gizmo";
 
-	StringName _proxgroup_add;
-	StringName _proxgroup_remove;
+	const StringName offset = "offset";
+	const StringName rotation_mode = "rotation_mode";
+	const StringName rotate = "rotate";
+	const StringName h_offset = "h_offset";
+	const StringName v_offset = "v_offset";
 
-	StringName grouped;
-	StringName ungrouped;
+	const StringName area_entered = "area_entered";
+	const StringName area_exited = "area_exited";
 
-	StringName has_point;
-	StringName get_drag_data;
-	StringName can_drop_data;
-	StringName drop_data;
+	const StringName frame_changed = "frame_changed";
+	const StringName texture_changed = "texture_changed";
 
-	StringName enter_screen;
-	StringName exit_screen;
-	StringName enter_viewport;
-	StringName exit_viewport;
-	StringName enter_camera;
-	StringName exit_camera;
+	const StringName autoplay = "autoplay";
+	const StringName blend_times = "blend_times";
+	const StringName speed = "speed";
 
-	StringName _body_enter_tree;
-	StringName _body_exit_tree;
+	const StringName default_ = "default"; // default would conflict with C++ keyword.
+	const StringName output = "output";
 
-	StringName _area_enter_tree;
-	StringName _area_exit_tree;
+	const StringName Master = "Master"; // Audio bus name.
 
-	StringName changed;
-	StringName _shader_changed;
+	const StringName theme_changed = "theme_changed";
+	const StringName shader = "shader";
+	const StringName shader_overrides_group = "_shader_overrides_group_";
+	const StringName shader_overrides_group_active = "_shader_overrides_group_active_";
 
-	StringName _spatial_editor_group;
-	StringName _request_gizmo;
+	const StringName _custom_type_script = "_custom_type_script";
 
-	StringName offset;
-	StringName unit_offset;
-	StringName rotation_mode;
-	StringName rotate;
-	StringName v_offset;
-	StringName h_offset;
+	const StringName pressed = "pressed";
+	const StringName id_pressed = "id_pressed";
+	const StringName toggled = "toggled";
+	const StringName hover = "hover";
 
-	StringName transform_pos;
-	StringName transform_rot;
-	StringName transform_scale;
+	const StringName panel = "panel";
+	const StringName item_selected = "item_selected";
+	const StringName confirmed = "confirmed";
 
-	StringName _update_remote;
-	StringName _update_pairs;
+	const StringName text_changed = "text_changed";
+	const StringName text_submitted = "text_submitted";
+	const StringName value_changed = "value_changed";
 
-	StringName area_enter;
-	StringName area_exit;
+	const StringName Start = "Start";
+	const StringName End = "End";
+	const StringName state_started = "state_started";
+	const StringName state_finished = "state_finished";
 
-	StringName get_minimum_size;
-
-	StringName play_play;
-
-	StringName _im_update;
-	StringName _queue_update;
-
-	StringName baked_light_changed;
-	StringName _baked_light_changed;
-
-	StringName _mouse_enter;
-	StringName _mouse_exit;
-
-	StringName frame_changed;
-
-	StringName playback_speed;
-	StringName playback_active;
-	StringName autoplay;
-	StringName blend_times;
-	StringName speed;
-
-	NodePath path_pp;
-
-	StringName _default;
-
-	StringName node_configuration_warning_changed;
-
-	enum {
-		MAX_MATERIALS=32
-	};
-	StringName mesh_materials[MAX_MATERIALS];
-	StringName _mesh_changed;
-
+	const StringName FlatButton = "FlatButton";
 };
 
-
-#endif // SCENE_STRING_NAMES_H
+#define SceneStringName(m_name) SceneStringNames::get_singleton()->m_name

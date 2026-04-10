@@ -1,246 +1,166 @@
-/*************************************************************************/
-/*  ip_unix.cpp                                                          */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
-/*************************************************************************/
-/* Copyright (c) 2007-2016 Juan Linietsky, Ariel Manzur.                 */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  ip_unix.cpp                                                           */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#if defined(UNIX_ENABLED) && !defined(UNIX_SOCKET_UNAVAILABLE)
+
 #include "ip_unix.h"
 
-#if defined(UNIX_ENABLED) || defined(WINDOWS_ENABLED)
+#include <netdb.h>
 
-#include <string.h>
-
-#ifdef WINDOWS_ENABLED
-  // Workaround mingw missing flags!
-  #ifndef AI_ADDRCONFIG
-    #define AI_ADDRCONFIG 0x00000400
-  #endif
-  #ifndef AI_V4MAPPED
-    #define AI_V4MAPPED 0x00000800
-  #endif
- #ifdef UWP_ENABLED
-  #include <ws2tcpip.h>
-  #include <winsock2.h>
-  #include <windows.h>
-  #include <stdio.h>
- #else
-  #define WINVER 0x0600
-  #include <ws2tcpip.h>
-  #include <winsock2.h>
-  #include <windows.h>
-  #include <stdio.h>
-  #include <iphlpapi.h>
- #endif
+#ifdef ANDROID_ENABLED
+// We could drop this file once we up our API level to 24,
+// where the NDK's ifaddrs.h supports to needed getifaddrs.
+#include <thirdparty/misc/ifaddrs-android.h>
 #else
- #include <netdb.h>
- #ifdef ANDROID_ENABLED
-  #include "platform/android/ifaddrs_android.h"
- #else
-  #ifdef __FreeBSD__
-   #include <sys/types.h>
-  #endif
-  #include <ifaddrs.h>
- #endif
- #include <arpa/inet.h>
- #include <sys/socket.h>
- #ifdef __FreeBSD__
-  #include <netinet/in.h>
- #endif
+#ifdef __FreeBSD__
+#include <sys/types.h>
+#endif
+#include <ifaddrs.h>
 #endif
 
-static IP_Address _sockaddr2ip(struct sockaddr* p_addr) {
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
-	IP_Address ip;
+#ifdef __FreeBSD__
+#include <netinet/in.h>
+#endif
+
+#include <net/if.h> // Order is important on OpenBSD, leave as last.
+
+static IPAddress _sockaddr2ip(struct sockaddr *p_addr) {
+	IPAddress ip;
+
 	if (p_addr->sa_family == AF_INET) {
-		struct sockaddr_in* addr = (struct sockaddr_in*)p_addr;
-		ip.field32[0] = *((unsigned long*)&addr->sin_addr);
-		ip.type = IP_Address::TYPE_IPV4;
-	} else {
-		struct sockaddr_in6* addr6 = (struct sockaddr_in6*)p_addr;
-		for (int i=0; i<16; i++)
-			ip.field8[i] = addr6->sin6_addr.s6_addr[i];
-		ip.type = IP_Address::TYPE_IPV6;
-	};
+		struct sockaddr_in *addr = (struct sockaddr_in *)p_addr;
+		ip.set_ipv4((uint8_t *)&(addr->sin_addr));
+	} else if (p_addr->sa_family == AF_INET6) {
+		struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)p_addr;
+		ip.set_ipv6(addr6->sin6_addr.s6_addr);
+	}
 
 	return ip;
-};
+}
 
-IP_Address IP_Unix::_resolve_hostname(const String& p_hostname, IP_Address::AddrType p_type) {
-
+void IPUnix::_resolve_hostname(List<IPAddress> &r_addresses, const String &p_hostname, Type p_type) const {
 	struct addrinfo hints;
-	struct addrinfo* result;
+	struct addrinfo *result = nullptr;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	if (p_type == IP_Address::TYPE_IPV4) {
+	if (p_type == TYPE_IPV4) {
 		hints.ai_family = AF_INET;
-	} else if (p_type == IP_Address::TYPE_IPV6) {
+	} else if (p_type == TYPE_IPV6) {
 		hints.ai_family = AF_INET6;
 		hints.ai_flags = 0;
 	} else {
 		hints.ai_family = AF_UNSPEC;
-		hints.ai_flags = (AI_V4MAPPED | AI_ADDRCONFIG);
-	};
+		hints.ai_flags = AI_ADDRCONFIG;
+	}
+	hints.ai_flags &= ~AI_NUMERICHOST;
 
-	int s = getaddrinfo(p_hostname.utf8().get_data(), NULL, &hints, &result);
+	int s = getaddrinfo(p_hostname.utf8().get_data(), nullptr, &hints, &result);
 	if (s != 0) {
-		ERR_PRINT("getaddrinfo failed!");
-		return IP_Address();
-	};
-
-	if (result == NULL || result->ai_addr == NULL) {
-		ERR_PRINT("Invalid response from getaddrinfo");
-		return IP_Address();
-	};
-
-	IP_Address ip = _sockaddr2ip(result->ai_addr);
-
-	freeaddrinfo(result);
-
-	return ip;
-
-}
-
-#if defined(WINDOWS_ENABLED)
-
-#if defined(UWP_ENABLED)
-
-void IP_Unix::get_local_addresses(List<IP_Address> *r_addresses) const {
-
-	using namespace Windows::Networking;
-	using namespace Windows::Networking::Connectivity;
-
-	auto hostnames = NetworkInformation::GetHostNames();
-
-	for (int i = 0; i < hostnames->Size; i++) {
-
-		if (hostnames->GetAt(i)->Type == HostNameType::Ipv4 || hostnames->GetAt(i)->Type == HostNameType::Ipv6 && hostnames->GetAt(i)->IPInformation != nullptr) {
-
-			r_addresses->push_back(IP_Address(String(hostnames->GetAt(i)->CanonicalName->Data())));
-		}
+		print_verbose("getaddrinfo failed! Cannot resolve hostname.");
+		return;
 	}
 
-};
-#else
-
-void IP_Unix::get_local_addresses(List<IP_Address> *r_addresses) const {
-
-	ULONG buf_size = 1024;
-	IP_ADAPTER_ADDRESSES* addrs;
-
-	while (true) {
-
-		addrs = (IP_ADAPTER_ADDRESSES*)memalloc(buf_size);
-		int err = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST |
-									   GAA_FLAG_SKIP_MULTICAST |
-									   GAA_FLAG_SKIP_DNS_SERVER |
-									   GAA_FLAG_SKIP_FRIENDLY_NAME,
-									 NULL, addrs, &buf_size);
-		if (err == NO_ERROR) {
-			break;
-		};
-		memfree(addrs);
-		if (err == ERROR_BUFFER_OVERFLOW) {
-			continue; // will go back and alloc the right size
-		};
-
-		ERR_EXPLAIN("Call to GetAdaptersAddresses failed with error " + itos(err));
-		ERR_FAIL();
+	if (result == nullptr || result->ai_addr == nullptr) {
+		print_verbose("Invalid response from getaddrinfo.");
+		if (result) {
+			freeaddrinfo(result);
+		}
 		return;
-	};
+	}
 
+	struct addrinfo *next = result;
 
-	IP_ADAPTER_ADDRESSES* adapter = addrs;
+	do {
+		if (next->ai_addr == nullptr) {
+			next = next->ai_next;
+			continue;
+		}
+		IPAddress ip = _sockaddr2ip(next->ai_addr);
+		if (ip.is_valid() && !r_addresses.find(ip)) {
+			r_addresses.push_back(ip);
+		}
+		next = next->ai_next;
+	} while (next);
 
-	while (adapter != NULL) {
+	freeaddrinfo(result);
+}
 
-		IP_ADAPTER_UNICAST_ADDRESS* address = adapter->FirstUnicastAddress;
-		while (address != NULL) {
-
-			IP_Address ip;
-
-			if (address->Address.lpSockaddr->sa_family == AF_INET) {
-
-				SOCKADDR_IN* ipv4 = reinterpret_cast<SOCKADDR_IN*>(address->Address.lpSockaddr);
-
-				ip.field32[0] = *((unsigned long*)&ipv4->sin_addr);
-				ip.type = IP_Address::TYPE_IPV4;
-			} else { // ipv6
-
-				SOCKADDR_IN6* ipv6 = reinterpret_cast<SOCKADDR_IN6*>(address->Address.lpSockaddr);
-				for (int i=0; i<16; i++) {
-					ip.field8[i] = ipv6->sin6_addr.s6_addr[i];
-				};
-				ip.type = IP_Address::TYPE_IPV6;
-			};
-
-
-			r_addresses->push_back(ip);
-
-			address = address->Next;
-		};
-		adapter = adapter->Next;
-	};
-
-	memfree(addrs);
-};
-
-#endif
-
-#else
-
-void IP_Unix::get_local_addresses(List<IP_Address> *r_addresses) const {
-
-	struct ifaddrs * ifAddrStruct=NULL;
-	struct ifaddrs * ifa=NULL;
+void IPUnix::get_local_interfaces(HashMap<String, Interface_Info> *r_interfaces) const {
+	struct ifaddrs *ifAddrStruct = nullptr;
+	struct ifaddrs *ifa = nullptr;
+	int family;
 
 	getifaddrs(&ifAddrStruct);
 
-	for (ifa = ifAddrStruct; ifa != NULL; ifa = ifa->ifa_next) {
-		if (!ifa->ifa_addr)
+	for (ifa = ifAddrStruct; ifa != nullptr; ifa = ifa->ifa_next) {
+		if (!ifa->ifa_addr) {
 			continue;
+		}
 
-		IP_Address ip = _sockaddr2ip(ifa->ifa_addr);
-		r_addresses->push_back(ip);
+		family = ifa->ifa_addr->sa_family;
+
+		if (family != AF_INET && family != AF_INET6) {
+			continue;
+		}
+
+		HashMap<String, Interface_Info>::Iterator E = r_interfaces->find(ifa->ifa_name);
+		if (!E) {
+			Interface_Info info;
+			info.name = ifa->ifa_name;
+			info.name_friendly = ifa->ifa_name;
+			info.index = String::num_uint64(if_nametoindex(ifa->ifa_name));
+			E = r_interfaces->insert(ifa->ifa_name, info);
+			ERR_CONTINUE(!E);
+		}
+
+		Interface_Info &info = E->value;
+		info.ip_addresses.push_front(_sockaddr2ip(ifa->ifa_addr));
 	}
 
-	if (ifAddrStruct!=NULL) freeifaddrs(ifAddrStruct);
-
-}
-#endif
-
-void IP_Unix::make_default() {
-
-	_create=_create_unix;
+	if (ifAddrStruct != nullptr) {
+		freeifaddrs(ifAddrStruct);
+	}
 }
 
-IP* IP_Unix::_create_unix() {
-
-	return memnew( IP_Unix );
+void IPUnix::make_default() {
+	_create = _create_unix;
 }
 
-IP_Unix::IP_Unix() {
+IP *IPUnix::_create_unix() {
+	return memnew(IPUnix);
 }
 
-#endif
+IPUnix::IPUnix() {
+}
+
+#endif // UNIX_ENABLED
